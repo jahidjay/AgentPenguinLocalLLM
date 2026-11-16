@@ -1,0 +1,15 @@
+# Headless CLI overlay for local 9B context compaction and tool output pruning
+
+- id: compaction-basic
+  name: '@deepseek-ai/dsh-compaction-basic'
+  config:
+    thresholdRatio: 0.8
+    headroomTokens: 8192
+    retainRatio: 0.16
+
+- id: tool-result-pruner
+  name: '@deepseek-ai/dsh-compaction-tool-result-pruner'
+  config:
+    thresholdChars: 8192
+    headChars: 4096
+    tailChars: 1024

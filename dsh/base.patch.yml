@@ -1,0 +1,55 @@
+# Shared local Qwen 9B + optional Claude configuration for DeepSeek Harness (dsh).
+# Tuned via env vars set by start-win.cmd / start-mac.command:
+#   AGENT_MODEL, AGENT_CTX, AGENT_MAX_TOKENS, OLLAMA_HOST, OLLAMA_API_KEY
+
+- id: agent-default-model
+  name: '@deepseek-ai/dsh-agent-default-model'
+  config:
+    provider: ollama
+    model: !!js process.env.AGENT_MODEL || 'qwen3.5:latest'
+
+- id: llm-pi-ai
+  name: '@deepseek-ai/dsh-llm-pi-ai'
+  config:
+    providers:
+      ollama:
+        displayName: Ollama (Local 9B)
+        api: openai-completions
+        apiKeyEnv: OLLAMA_API_KEY
+        baseURL: !!js process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434/v1'
+        reasoning: medium
+        timeoutMs: 600000
+        streamIdleTimeoutMs: 300000
+        compat:
+          thinkingFormat: openai
+          supportsReasoningEffort: true
+          supportsDeveloperRole: false
+          supportsStore: false
+          maxTokensField: max_tokens
+        models:
+          - id: qwen3.5:latest
+            name: Qwen 3.5 9B (Local)
+            contextWindow: !!js Number(process.env.AGENT_CTX) || 131072
+            # Keep output > 64K when context allows, while never exceeding 55% of contextWindow
+            maxTokens: !!js Math.min(Number(process.env.AGENT_MAX_TOKENS) || 69632, Math.max(8192, Math.floor((Number(process.env.AGENT_CTX) || 131072) * 0.55)))
+            input:
+              - text
+              - image
+            reasoningEfforts:
+              off: none
+              low: low
+              medium: medium
+              high: high
+          - id: hf.co/deepreinforce-ai/Ornith-1.0-9B-GGUF:latest
+            name: Ornith 1.0 9B (Qwen3.5 Agentic)
+            contextWindow: !!js Number(process.env.AGENT_CTX) || 131072
+            maxTokens: !!js Math.min(Number(process.env.AGENT_MAX_TOKENS) || 69632, Math.max(8192, Math.floor((Number(process.env.AGENT_CTX) || 131072) * 0.55)))
+            input:
+              - text
+            reasoningEfforts:
+              off: none
+              low: low
+              medium: medium
+              high: high
+      # Built-in Anthropic catalog for Claude brain / escalation (authenticate via Models UI or ANTHROPIC_API_KEY)
+      anthropic: {}
