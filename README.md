@@ -1,84 +1,75 @@
 # AgentPenguinLocalLLM
 
-Minimal, 1-click local agentic coding setup built on **DeepSeek Harness (`@deepseek-ai/dsh`)** + **Ollama** for **Qwen 3.5 9B** / **Ornith 1.0 9B**, with **Claude** ready as an optional escalation brain.
+**Single-binary Rust agentic coding server + LAN Web UI + CLI** for **Qwen 3.5 9B** / **Ornith 1.0 9B** (via Ollama) with optional **Claude Brain** escalation.
 
-Focused on **C++**, **Python**, and **Rust** workflows with:
-- **Think & Plan before executing scripts** (`AGENTS.md`, `dsh-plan-mode`, and Ollama `reasoning_effort` enabled)
-- **Context-window awareness** (`dsh-token-meter`, `dsh-compaction-basic`, and `dsh-compaction-tool-result-pruner` tuned to match Ollama's real `num_ctx`)
-- **Two launch surfaces**: Antigravity-style browser IDE (`dsh web`) or terminal (`dsh headless` / `ollama launch claude`)
+Run the local GPU LLM on your Windows PC (RTX 3070 8 GB + 32 GB RAM) or M2 Mac (16 GB RAM), then **open and control it from your Mac over your local Wi-Fi/Ethernet network** — switching models, thinking depth, context window (`<= 200K`), output tokens (`> 64K`), workspace folder, `AGENTS.md` rules, and `plan-first` vs `auto` execution live with zero restarts.
 
 ---
 
-## Hardware & Context Budget
+## Why Rust + LAN Control?
+- **No Node.js/npm runtime required** for the main agent (`penguin-agent.exe` / `penguin-agent`).
+- **True LAN Web UI (`0.0.0.0:3080`)** with token auth (`~/.penguin-agent-token` so your Mac bookmark stays stable across restarts) and live SSE streaming.
+- **Change agentic work live from Mac:**
+  - Switch between `qwen3.5:latest`, `hf.co/deepreinforce-ai/Ornith-1.0-9B-GGUF:latest`, any model in Ollama `/api/tags`, `anthropic` API, or local `claude` CLI (`claude-cli`).
+  - Adjust `num_ctx` (`32K` / `64K` / `128K` / `192K`) and `max_tokens` (`69632` `> 64K` default) **per request** via Ollama `/api/chat`.
+  - Toggle **Mode** (`plan-first` with browser Approve/Reject vs `auto`) and **Think Effort** (`off`/`low`/`medium`/`high`).
+  - Switch host **Workspace**, live-edit/save **`AGENTS.md`**, run 1-click **Python / C++ / Rust** checks, **Compact** context, or click **Ask Claude Brain** when stuck.
+- **Context-Window Safe:** Real `prompt_eval_count` meter, bounded `read_file` (<= 200 lines), bounded `run_command` output (head + tail truncation), and auto-compaction at 78% of `num_ctx`.
 
-Qwen3.5-9B uses a hybrid architecture (24 Gated DeltaNet recurrent layers + 8 Gated Full Attention layers with 4 KV heads), keeping long-context KV cache relatively small when paired with Flash Attention and 4-bit KV cache quantization (`OLLAMA_FLASH_ATTENTION=1`, `OLLAMA_KV_CACHE_TYPE=q4_0`).
+---
 
-| Machine | Default `AGENT_CTX` | `maxTokens` (Output) | Measured / Expected Memory |
+## Hardware & Context Budget (Measured on RTX 3070 8 GB + 31.2 GB RAM)
+
+With `OLLAMA_FLASH_ATTENTION=1` and `OLLAMA_KV_CACHE_TYPE=q4_0`:
+
+| Machine | Default `AGENT_CTX` | `max_tokens` | Memory Footprint |
 | :--- | :--- | :--- | :--- |
 | **Windows (RTX 3070 8 GB + 32 GB RAM)** | `131072` (128K) | `69632` (> 64K) | **~8.1 GB** (`qwen3.5:latest`, ~69% GPU / 31% RAM) |
 | **Windows 192K (`<= 200K`)** | `196608` (192K) | `69632` (> 64K) | **~9.2 GB** (`qwen3.5:latest`, ~59% GPU / 41% RAM) |
-| **M2 Mac (16 GB Unified RAM)** | `131072` (128K) | `69632` (> 64K) | **~8.1 GB** (~5 GB left for macOS; set `AGENT_CTX=65536` if tight) |
-
-> **Why `headroomTokens: 8192` matters:** DeepSeek Harness's `@deepseek-ai/dsh-compaction-basic` caps auto-compaction at `contextWindow - maxTokens - headroomTokens`, and `headroomTokens` defaults to `65536`. Without lowering `headroomTokens` to `8192`, a `131072` context with `> 64K` output would leave `0` usable input tokens and fail validation. `dsh/base.patch.yml` also clamps `maxTokens` automatically if you lower `AGENT_CTX`.
-
----
-
-## Prerequisites
-
-1. **Ollama** installed (`ollama` in `PATH`)
-2. **Node.js** (already ships `npx`, or install DSH globally once: `npm i -g @deepseek-ai/dsh`)
-3. *(Optional)* **Claude Code (`claude`)** or an `ANTHROPIC_API_KEY` if you want Claude as a backup brain
+| **M2 Mac (16 GB Unified RAM)** | `131072` (128K) | `69632` (> 64K) | **~8.1 GB** (~5 GB left for macOS; pick `65536` in UI if tight) |
 
 ---
 
 ## 1-Click Quick Start
 
-### Windows (8 GB GPU / 32 GB RAM)
-- **1-click Browser IDE:** Double-click [`start-win.cmd`](start-win.cmd) (or run `.\start-win.cmd shortcut` once to place a launcher on your Desktop).
-- **Use Ornith 1.0 9B (RL-tuned for coding/terminal):**
-  ```cmd
-  start-win.cmd ornith
-  ```
-- **Push to 192K context (`<= 200K`):**
-  ```cmd
-  set AGENT_CTX=196608 && start-win.cmd
-  ```
-- **Pure Terminal Mode (one-shot headless):**
-  ```cmd
-  start-win.cmd headless "Build and test the Rust crate, fix any errors"
-  ```
-- **Pure Terminal TUI (Claude Code UI backed by local 9B):**
-  ```cmd
-  start-win.cmd claude
-  ```
-
-### M2 Mac (16 GB Unified RAM)
-Make [`start-mac.command`](start-mac.command) executable once (`chmod +x start-mac.command`), then **double-click it in Finder** for 1-click Browser IDE launch, or run from Terminal:
-```bash
-./start-mac.command                 # Web UI (qwen3.5:latest, 128K ctx, >64K output)
-./start-mac.command ornith          # Web UI with Ornith-1.0-9B
-AGENT_CTX=65536 ./start-mac.command # Lower memory mode for M2 16GB
-./start-mac.command headless "Run pytest and fix failures"
-./start-mac.command claude          # Terminal TUI backed by local 9B
+### 1. Start on Windows (Host with 8 GB GPU)
+Double-click [`start-win.cmd`](start-win.cmd) (or run `.\start-win.cmd shortcut` once to add a Desktop shortcut).
+On first run it builds `target\release\penguin-agent.exe`, starts Ollama with `q4_0` KV cache, and prints:
+```text
+PenguinAgent LAN Server
+  Local URL: http://127.0.0.1:3080/?token=...
+  Mac / LAN: http://192.168.x.x:3080/?token=...
 ```
+> **Windows Firewall:** If your Mac cannot open `http://192.168.x.x:3080`, allow `penguin-agent.exe` on **Private networks** when Windows prompts (or allow TCP port `3080` on Private profile).
 
----
+### 2. Connect from Your Mac on the Same Network
+- **From Mac Browser (Safari / Chrome):** Open the printed `Mac / LAN` URL (`http://<WIN_LAN_IP>:3080/?token=...`).
+- **From Mac Terminal:**
+  ```bash
+  # Check status
+  ./start-mac.command remote http://192.168.x.x:3080 --token <TOKEN>
 
-## Using Claude as the "Brain" Alongside Local 9B
+  # Change model, mode, or context live on the Windows host
+  ./start-mac.command remote http://192.168.x.x:3080 --token <TOKEN> \
+    --set model=hf.co/deepreinforce-ai/Ornith-1.0-9B-GGUF:latest --set mode=auto --set num_ctx=196608
 
-Two zero-code ways to combine local Qwen 9B with Claude:
-1. **Inside DSH Web UI:** `dsh/base.patch.yml` registers the built-in `anthropic` route alongside `ollama`. Open **Settings -> Models** in the Web UI (or set `ANTHROPIC_API_KEY`) to authenticate, then switch the main chat or subagent model to Claude whenever a tricky C++/Rust/architecture problem needs heavy reasoning.
-2. **Via Claude Code CLI (`claude`):** Keep local 9B doing routine edits/builds, and run `claude -p "<problem + file paths>"` from the terminal or DSH shell when you want your Claude Pro/Max subscription to diagnose a stubborn issue.
+  # Send a coding task from Mac Terminal to Windows GPU
+  ./start-mac.command remote http://192.168.x.x:3080 --token <TOKEN> --cli "Run cargo test and fix any error"
+  ```
+- **Or run standalone locally on M2 Mac:** `chmod +x start-mac.command` once, then double-click `start-mac.command` in Finder.
+
+### Other Modes
+- **Switch default model to Ornith 1.0 9B:** `.\start-win.cmd ornith` (or change it live in the UI)
+- **Single-shot CLI in Rust:** `.\start-win.cmd cli "Check src/main.rs and run cargo test"`
+- **Legacy DeepSeek Harness (`dsh`) / Claude Code local TUI:** `.\start-win.cmd dsh` or `.\start-win.cmd claude`
 
 ---
 
 ## Files
-
 | File | Purpose |
 | :--- | :--- |
-| [`start-win.cmd`](start-win.cmd) | 1-click Windows launcher (starts Ollama with `q4_0` KV + flash attention, pulls model if missing, launches DSH or Claude TUI) |
-| [`start-mac.command`](start-mac.command) | 1-click macOS Finder/Terminal launcher for M2 16 GB |
-| [`dsh/base.patch.yml`](dsh/base.patch.yml) | Ollama (`qwen3.5:latest`, `Ornith-1.0-9B`) + `anthropic` provider catalog, thinking/reasoning effort, dynamic context/output caps |
-| [`dsh/web.patch.yml`](dsh/web.patch.yml) | Default `penguin` Web UI preset (think-first persona, plan mode, `headroomTokens: 8192` compaction, tool-result pruning) |
-| [`dsh/headless.patch.yml`](dsh/headless.patch.yml) | Compaction + tool-output pruning overlay for `dsh --profile headless` |
-| [`AGENTS.md`](AGENTS.md) | Shared C++ / Python / Rust verification & context-awareness instructions loaded automatically by DSH and Claude Code |
+| [`Cargo.toml`](Cargo.toml) & [`src/`](src/) | Single-binary Rust server, Ollama `/api/chat` streamer, Anthropic/Claude Brain bridge, workspace tools, and embedded Web UI |
+| [`start-win.cmd`](start-win.cmd) | 1-click Windows launcher (auto-builds Rust binary, starts Ollama, prints LAN URL) |
+| [`start-mac.command`](start-mac.command) | 1-click macOS Finder/Terminal launcher & `--remote` LAN client |
+| [`AGENTS.md`](AGENTS.md) | Think-first, context-bounded C++ / Python / Rust rules (editable live from the Mac UI) |
+| [`dsh/`](dsh/) | Optional `@deepseek-ai/dsh` YAML overlays (`start-win.cmd dsh`) |

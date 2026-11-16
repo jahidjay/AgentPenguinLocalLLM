@@ -25,6 +25,13 @@ if /I "%~1"=="shortcut" (
   exit /b 0
 )
 
+if /I "%~1"=="remote" (
+  shift
+  call :ensure_rust || exit /b 1
+  "%ROOT%\target\release\penguin-agent.exe" --remote %1 %2 %3 %4 %5 %6 %7 %8 %9
+  exit /b %errorlevel%
+)
+
 where ollama >nul 2>nul || (
   echo [ERROR] Ollama is not installed or not in PATH.
   pause
@@ -65,22 +72,57 @@ if /I "%~1"=="claude" (
   exit /b %errorlevel%
 )
 
-if /I "%~1"=="headless" (
+if /I "%~1"=="dsh" (
   shift
-  call :run_dsh --profile headless --patch "%ROOT%\dsh\base.patch.yml" --patch "%ROOT%\dsh\headless.patch.yml" %1 %2 %3 %4 %5 %6 %7 %8 %9
+  where dsh.cmd >nul 2>nul
+  if not errorlevel 1 (
+    call dsh.cmd --profile web --patch "%ROOT%\dsh\base.patch.yml" --patch "%ROOT%\dsh\web.patch.yml" %1 %2 %3 %4 %5 %6 %7 %8 %9
+  ) else (
+    call npx.cmd -y @deepseek-ai/dsh --profile web --patch "%ROOT%\dsh\base.patch.yml" --patch "%ROOT%\dsh\web.patch.yml" %1 %2 %3 %4 %5 %6 %7 %8 %9
+  )
   exit /b %errorlevel%
 )
 
-echo Launching DeepSeek Harness Web UI ^(%AGENT_MODEL%, ctx=%AGENT_CTX%, maxTokens=%AGENT_MAX_TOKENS%^)...
-call :run_dsh --profile web --patch "%ROOT%\dsh\base.patch.yml" --patch "%ROOT%\dsh\web.patch.yml" %1 %2 %3 %4 %5 %6 %7 %8 %9
+if /I "%~1"=="rebuild" (
+  shift
+  pushd "%ROOT%" && cargo build --release && popd || exit /b 1
+)
+
+call :ensure_rust || (
+  pause
+  exit /b 1
+)
+
+if /I "%~1"=="cli" (
+  shift
+  "%ROOT%\target\release\penguin-agent.exe" --cli %1 %2 %3 %4 %5 %6 %7 %8 %9
+  exit /b %errorlevel%
+)
+
+if /I "%~1"=="headless" (
+  shift
+  "%ROOT%\target\release\penguin-agent.exe" --cli %1 %2 %3 %4 %5 %6 %7 %8 %9
+  exit /b %errorlevel%
+)
+
+set "_open_flag=--open"
+for %%A in (%*) do (
+  if /I "%%~A"=="--no-open" set "_open_flag="
+)
+if not "%~1"=="" (
+  "%ROOT%\target\release\penguin-agent.exe" %1 %2 %3 %4 %5 %6 %7 %8 %9
+) else (
+  "%ROOT%\target\release\penguin-agent.exe" %_open_flag%
+)
 if errorlevel 1 pause
 exit /b %errorlevel%
 
-:run_dsh
-where dsh.cmd >nul 2>nul
-if not errorlevel 1 (
-  call dsh.cmd %*
-  exit /b %errorlevel%
+:ensure_rust
+if exist "%ROOT%\target\release\penguin-agent.exe" exit /b 0
+where cargo >nul 2>nul || (
+  echo [ERROR] Rust cargo not found. Install from https://rustup.rs
+  exit /b 1
 )
-call npx.cmd -y @deepseek-ai/dsh %*
+echo Building penguin-agent (first run)...
+pushd "%ROOT%" && cargo build --release && popd
 exit /b %errorlevel%

@@ -1,0 +1,421 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>PenguinAgent — Local LAN LLM</title>
+<style>
+  :root {
+    --bg: #0d1117; --panel: #161b22; --border: #30363d; --text: #e6edf3;
+    --muted: #8b949e; --accent: #58a6ff; --green: #3fb950; --amber: #d29922; --red: #f85149;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace; background: var(--bg); color: var(--text); height: 100vh; display: flex; flex-direction: column; }
+  header { display: flex; align-items: center; justify-content: space-between; padding: 10px 14px; background: var(--panel); border-bottom: 1px solid var(--border); gap: 12px; flex-wrap: wrap; }
+  .brand { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 8px; }
+  .pill { font-size: 11px; padding: 2px 8px; border-radius: 99px; border: 1px solid var(--border); color: var(--muted); }
+  .pill.live { color: var(--green); border-color: var(--green); }
+  .meter-wrap { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+  .meter { width: 140px; height: 8px; background: #21262d; border-radius: 4px; overflow: hidden; }
+  .meter > div { height: 100%; background: var(--accent); transition: width 0.2s; }
+  main { flex: 1; display: grid; grid-template-columns: 320px 1fr; min-height: 0; }
+  @media (max-width: 860px) { main { grid-template-columns: 1fr; grid-template-rows: auto 1fr; } aside { max-height: 44vh; border-right: none !important; border-bottom: 1px solid var(--border); } }
+  aside { background: var(--panel); border-right: 1px solid var(--border); padding: 12px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; font-size: 12px; }
+  label { display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 11px; }
+  input, select, textarea { background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 8px; font-family: inherit; font-size: 12px; }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .btn-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  button { background: #21262d; color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; font-size: 12px; cursor: pointer; }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: #1f6feb; border-color: #388bfd; font-weight: 600; }
+  button.warn { background: #9e6a03; border-color: var(--amber); }
+  button.danger { background: #da3633; border-color: var(--red); }
+  section.chat-pane { display: flex; flex-direction: column; min-height: 0; }
+  #log { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { padding: 10px 12px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); white-space: pre-wrap; word-break: break-word; font-size: 13px; line-height: 1.45; }
+  .msg.user { background: #13233a; border-color: #1f6feb; align-self: flex-end; max-width: 85%; }
+  .msg.tool { background: #0d1520; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: #c9d1d9; }
+  .msg.claude { background: #1e1633; border-color: #8957e5; }
+  .msg.err { background: #2b1316; border-color: var(--red); color: #ffa198; }
+  details.think { margin-bottom: 6px; color: var(--muted); font-size: 12px; border-left: 2px solid var(--border); padding-left: 8px; }
+  details.think summary { cursor: pointer; color: var(--amber); }
+  .approval { margin: 0 14px 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--amber); background: #271e0b; display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+  form.composer { display: flex; gap: 8px; padding: 10px 14px; background: var(--panel); border-top: 1px solid var(--border); }
+  form.composer textarea { flex: 1; resize: vertical; min-height: 44px; max-height: 180px; }
+  #authGate { position: fixed; inset: 0; background: rgba(13,17,23,0.96); display: none; align-items: center; justify-content: center; z-index: 20; }
+  #authGate .card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px; padding: 20px; width: 340px; display: flex; flex-direction: column; gap: 10px; }
+</style>
+</head>
+<body>
+<div id="authGate">
+  <div class="card">
+    <strong>PenguinAgent LAN Token</strong>
+    <span style="color:var(--muted);font-size:12px;">Paste the token printed by the Windows/Mac host terminal.</span>
+    <input id="tokenInput" type="password" placeholder="LAN token" />
+    <button class="primary" id="tokenSubmit">Connect</button>
+  </div>
+</div>
+
+<header>
+  <div class="brand">
+    <span>PenguinAgent</span>
+    <span id="statusPill" class="pill">connecting...</span>
+  </div>
+  <div class="meter-wrap">
+    <div class="meter"><div id="meterBar" style="width:0%"></div></div>
+    <span id="meterText">0 / 131072 tok</span>
+    <button id="compactBtn" title="Summarize older context">Compact</button>
+    <button id="clearBtn" title="Clear chat">Clear</button>
+  </div>
+</header>
+
+<main>
+  <aside>
+    <div class="row">
+      <label>Provider
+        <select id="provider">
+          <option value="ollama">ollama (Local GPU)</option>
+          <option value="anthropic">anthropic (Claude API)</option>
+          <option value="claude-cli">claude-cli (Local CLI)</option>
+        </select>
+      </label>
+      <label>Mode
+        <select id="mode">
+          <option value="plan-first">plan-first (ask)</option>
+          <option value="auto">auto (execute)</option>
+        </select>
+      </label>
+    </div>
+
+    <label>Model (Ollama / Claude)
+      <input id="model" list="modelList" placeholder="qwen3.5:latest" />
+      <datalist id="modelList"></datalist>
+    </label>
+
+    <div class="row">
+      <label>Think Effort
+        <select id="think">
+          <option value="off">off</option>
+          <option value="low">low</option>
+          <option value="medium">medium</option>
+          <option value="high">high</option>
+        </select>
+      </label>
+      <label>Context (num_ctx)
+        <select id="numCtx">
+          <option value="32768">32K (32768)</option>
+          <option value="65536">64K (65536)</option>
+          <option value="131072">128K (131072)</option>
+          <option value="196608">192K (196608)</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="row">
+      <label>Max Output
+        <input id="maxTokens" type="number" min="2048" max="120000" step="1024" />
+      </label>
+      <label>Ollama URL
+        <input id="ollamaUrl" type="text" />
+      </label>
+    </div>
+
+    <label>Workspace Folder (Host)
+      <input id="workspace" type="text" />
+    </label>
+
+    <label>Agent Instructions (AGENTS.md)
+      <textarea id="instructions" rows="6"></textarea>
+    </label>
+
+    <div class="btn-row">
+      <button class="primary" id="applyCfg">Apply Live</button>
+      <button id="saveAgents">Save AGENTS.md</button>
+    </div>
+
+    <div style="border-top:1px solid var(--border);padding-top:8px;">
+      <div style="color:var(--muted);margin-bottom:6px;">Quick Checks & Brain</div>
+      <div class="btn-row">
+        <button data-check="python">Python</button>
+        <button data-check="cpp">C++</button>
+        <button data-check="rust">Rust</button>
+        <button class="warn" id="escalateBtn">Ask Claude Brain</button>
+      </div>
+    </div>
+  </aside>
+
+  <section class="chat-pane">
+    <div id="log"></div>
+    <div id="approvalBar" class="approval" style="display:none;">
+      <div>
+        <strong>Approval Needed (plan-first):</strong>
+        <div id="approvalText" style="font-size:12px;color:#f2cc60;margin-top:4px;"></div>
+      </div>
+      <div class="btn-row">
+        <button class="primary" id="approveYes">Approve & Run</button>
+        <button class="danger" id="approveNo">Reject</button>
+      </div>
+    </div>
+    <form class="composer" id="chatForm">
+      <textarea id="promptInput" placeholder="Describe the C++, Python, or Rust task (Enter to send, Shift+Enter for newline)..."></textarea>
+      <div class="btn-row" style="flex-direction:column;">
+        <button type="submit" class="primary" id="sendBtn">Send</button>
+        <button type="button" class="danger" id="stopBtn" style="display:none;">Stop</button>
+      </div>
+    </form>
+  </section>
+</main>
+
+<script>
+(() => {
+  const qs = new URLSearchParams(location.search);
+  let token = qs.get("token") || localStorage.getItem("penguin_token") || "";
+  if (qs.get("token")) {
+    localStorage.setItem("penguin_token", token);
+    history.replaceState({}, "", location.pathname);
+  }
+
+  const $ = (id) => document.getElementById(id);
+  const log = $("log");
+  let liveStreamEl = null;
+  let liveThinkEl = null;
+  let liveTextEl = null;
+
+  async function api(path, method = "GET", body = null) {
+    const headers = { "Authorization": "Bearer " + token };
+    if (body !== null) headers["Content-Type"] = "application/json";
+    const res = await fetch(path, { method, headers, body: body ? JSON.stringify(body) : null });
+    if (res.status === 401) {
+      $("authGate").style.display = "flex";
+      throw new Error("Unauthorized");
+    }
+    return res.json();
+  }
+
+  function esc(s) {
+    return (s || "").replace(/[&<>]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
+  }
+
+  function addCard(cls, html) {
+    const d = document.createElement("div");
+    d.className = "msg " + cls;
+    d.innerHTML = html;
+    log.appendChild(d);
+    log.scrollTop = log.scrollHeight;
+    return d;
+  }
+
+  function ensureStreamCard() {
+    if (liveStreamEl) return;
+    liveStreamEl = document.createElement("div");
+    liveStreamEl.className = "msg";
+    liveThinkEl = document.createElement("details");
+    liveThinkEl.className = "think";
+    liveThinkEl.style.display = "none";
+    liveThinkEl.innerHTML = "<summary>Thinking</summary><div></div>";
+    liveTextEl = document.createElement("div");
+    liveStreamEl.appendChild(liveThinkEl);
+    liveStreamEl.appendChild(liveTextEl);
+    log.appendChild(liveStreamEl);
+  }
+
+  function resetStreamCard() {
+    liveStreamEl = null; liveThinkEl = null; liveTextEl = null;
+  }
+
+  function renderHistory(msgs) {
+    log.innerHTML = "";
+    resetStreamCard();
+    for (const m of msgs || []) {
+      if (m.role === "user") {
+        const cls = (m.content || "").startsWith("[Claude Brain Guidance]") ? "claude" : "user";
+        addCard(cls, esc(m.content));
+      } else if (m.role === "assistant") {
+        let html = "";
+        if (m.thinking) html += `<details class="think"><summary>Thinking</summary><div>${esc(m.thinking)}</div></details>`;
+        if (m.content) html += `<div>${esc(m.content)}</div>`;
+        if (m.tool_calls && m.tool_calls.length) {
+          html += `<div style="margin-top:6px;color:var(--accent);font-size:12px;">Tools: ${m.tool_calls.map(t => esc(t.name)).join(", ")}</div>`;
+        }
+        if (html) addCard("", html);
+      } else if (m.role === "tool") {
+        addCard("tool", `<strong>${esc(m.tool_name || "tool")}:</strong>\n${esc(m.content)}`);
+      }
+    }
+  }
+
+  function applyConfigToForm(c) {
+    if (!c) return;
+    $("provider").value = c.provider;
+    $("mode").value = c.mode;
+    $("model").value = c.model;
+    $("think").value = c.think;
+    $("numCtx").value = String(c.num_ctx);
+    $("maxTokens").value = String(c.max_tokens);
+    $("ollamaUrl").value = c.ollama_url;
+    $("workspace").value = c.workspace;
+    $("instructions").value = c.instructions || "";
+  }
+
+  function updateUsage(u, cfg) {
+    if (!u) return;
+    const ctx = (cfg && cfg.num_ctx) || Number($("numCtx").value) || 131072;
+    const used = Math.max(u.prompt_tokens || 0, u.estimated_history_tokens || 0);
+    const pct = Math.min(100, Math.round((used / ctx) * 100));
+    $("meterBar").style.width = pct + "%";
+    $("meterBar").style.background = pct > 75 ? "var(--amber)" : "var(--accent)";
+    const cached = u.cached_tokens ? ` (cached ${u.cached_tokens})` : "";
+    $("meterText").textContent = `${used.toLocaleString()} / ${ctx.toLocaleString()} tok (${pct}%)${cached}`;
+  }
+
+  function showApproval(ap) {
+    if (!ap) { $("approvalBar").style.display = "none"; return; }
+    $("approvalText").textContent = `${ap.summary} — ${JSON.stringify(ap.arguments)}`;
+    $("approvalBar").style.display = "flex";
+  }
+
+  function setRunning(on) {
+    $("sendBtn").style.display = on ? "none" : "inline-block";
+    $("stopBtn").style.display = on ? "inline-block" : "none";
+  }
+
+  async function refreshState() {
+    const st = await api("/api/state");
+    $("authGate").style.display = "none";
+    applyConfigToForm(st.config);
+    const list = $("modelList");
+    list.innerHTML = "";
+    const models = new Set([...(st.ollama_models || []), "qwen3.5:latest", "hf.co/deepreinforce-ai/Ornith-1.0-9B-GGUF:latest", "claude-sonnet-4-6", "claude-opus-4-6"]);
+    for (const m of models) {
+      const o = document.createElement("option");
+      o.value = m;
+      list.appendChild(o);
+    }
+    renderHistory(st.messages);
+    updateUsage(st.usage, st.config);
+    showApproval(st.approval);
+    setRunning(st.running);
+    $("statusPill").textContent = st.running ? "running" : "LAN ready";
+    $("statusPill").className = "pill live";
+  }
+
+  function connectEvents() {
+    if (!token) { $("authGate").style.display = "flex"; return; }
+    const es = new EventSource(`/api/events?token=${encodeURIComponent(token)}`);
+    es.addEventListener("status", (e) => {
+      const d = JSON.parse(e.data);
+      $("statusPill").textContent = d.state === "idle" ? "LAN ready" : `${d.state} (${d.model || ""})`;
+      setRunning(d.state !== "idle" && d.state !== "cancelled");
+      if (d.state === "idle") resetStreamCard();
+    });
+    es.addEventListener("message", (e) => {
+      const d = JSON.parse(e.data);
+      addCard("user", esc(d.content));
+    });
+    es.addEventListener("thinking_delta", (e) => {
+      ensureStreamCard();
+      liveThinkEl.style.display = "block";
+      liveThinkEl.querySelector("div").textContent += JSON.parse(e.data).delta;
+      log.scrollTop = log.scrollHeight;
+    });
+    es.addEventListener("text_delta", (e) => {
+      ensureStreamCard();
+      liveTextEl.textContent += JSON.parse(e.data).delta;
+      log.scrollTop = log.scrollHeight;
+    });
+    es.addEventListener("assistant_done", (e) => {
+      const d = JSON.parse(e.data);
+      if (!liveStreamEl && (d.content || d.thinking)) {
+        ensureStreamCard();
+        if (d.thinking) { liveThinkEl.style.display = "block"; liveThinkEl.querySelector("div").textContent = d.thinking; }
+        liveTextEl.textContent = d.content || "";
+      }
+      if (d.tool_calls && d.tool_calls.length && liveStreamEl) {
+        const div = document.createElement("div");
+        div.style.cssText = "margin-top:6px;color:var(--accent);font-size:12px;";
+        div.textContent = "Tools: " + d.tool_calls.map(t => t.name).join(", ");
+        liveStreamEl.appendChild(div);
+      }
+      resetStreamCard();
+    });
+    es.addEventListener("tool_result", (e) => {
+      const d = JSON.parse(e.data);
+      addCard("tool", `<strong>${esc(d.name)}:</strong>\n${esc(d.result)}`);
+    });
+    es.addEventListener("approval_needed", (e) => showApproval(JSON.parse(e.data)));
+    es.addEventListener("approval_resolved", () => showApproval(null));
+    es.addEventListener("usage", (e) => {
+      const d = JSON.parse(e.data);
+      updateUsage(d, { num_ctx: d.num_ctx });
+    });
+    es.addEventListener("config_updated", (e) => applyConfigToForm(JSON.parse(e.data)));
+    es.addEventListener("compacted", (e) => addCard("tool", `<strong>Compacted history:</strong>\n${esc(JSON.parse(e.data).summary)}`));
+    es.addEventListener("claude_brain", (e) => addCard("claude", `<strong>Claude Brain Guidance:</strong>\n${esc(JSON.parse(e.data).advice)}`));
+    es.addEventListener("quick_check", (e) => {
+      const d = JSON.parse(e.data);
+      addCard("tool", `<strong>Quick Check (${esc(d.lang)}):</strong>\n${esc(d.output)}`);
+    });
+    es.addEventListener("cleared", () => { log.innerHTML = ""; resetStreamCard(); });
+    es.addEventListener("error", (e) => {
+      if (e.data) addCard("err", esc(JSON.parse(e.data).message));
+    });
+  }
+
+  async function saveConfig(saveAgentsMd = false) {
+    const res = await api("/api/config", "POST", {
+      provider: $("provider").value,
+      mode: $("mode").value,
+      model: $("model").value,
+      think: $("think").value,
+      num_ctx: Number($("numCtx").value),
+      max_tokens: Number($("maxTokens").value),
+      ollama_url: $("ollamaUrl").value,
+      workspace: $("workspace").value,
+      instructions: $("instructions").value,
+      save_agents_md: saveAgentsMd,
+    });
+    if (res.error) addCard("err", esc(res.error));
+  }
+
+  $("tokenSubmit").onclick = () => {
+    token = $("tokenInput").value.trim();
+    localStorage.setItem("penguin_token", token);
+    refreshState().then(connectEvents);
+  };
+  $("applyCfg").onclick = () => saveConfig(false);
+  $("saveAgents").onclick = () => saveConfig(true);
+  ["provider", "mode", "think", "numCtx"].forEach(id => $(id).onchange = () => saveConfig(false));
+  $("approveYes").onclick = () => api("/api/approve", "POST", { allow: true });
+  $("approveNo").onclick = () => api("/api/approve", "POST", { allow: false });
+  $("stopBtn").onclick = () => api("/api/stop", "POST", {});
+  $("compactBtn").onclick = () => api("/api/compact", "POST", {});
+  $("clearBtn").onclick = () => api("/api/clear", "POST", {});
+  $("escalateBtn").onclick = () => {
+    const note = $("promptInput").value.trim();
+    api("/api/escalate", "POST", { note });
+  };
+  document.querySelectorAll("[data-check]").forEach(btn => {
+    btn.onclick = () => api("/api/quick-check", "POST", { lang: btn.dataset.check });
+  });
+
+  $("promptInput").onkeydown = (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      $("chatForm").requestSubmit();
+    }
+  };
+  $("chatForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const prompt = $("promptInput").value.trim();
+    if (!prompt) return;
+    $("promptInput").value = "";
+    const res = await api("/api/chat", "POST", { prompt });
+    if (res.error) addCard("err", esc(res.error));
+  };
+
+  if (token) refreshState().then(connectEvents).catch(() => {});
+  else $("authGate").style.display = "flex";
+})();
+</script>
+</body>
+</html>
